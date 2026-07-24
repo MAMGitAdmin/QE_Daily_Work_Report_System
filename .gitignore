@@ -1,3 +1,10 @@
+uploads/
+staff.csv
+reports.json
+programmes.json
+programmes.json.lock
+config.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
