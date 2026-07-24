@@ -7,7 +7,6 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
 import hashlib, bcrypt
-import importlib.util as _ilu
 import threading
 import hmac
 from werkzeug.utils import secure_filename
@@ -28,16 +27,16 @@ def utc_now_iso():
 def malaysia_today():
     return datetime.now(MALAYSIA_TZ).strftime("%Y-%m-%d")
 
-def _load_config():
-    _cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.py')
-    if os.path.exists(_cfg_path):
-        _spec = _ilu.spec_from_file_location("_app_config", _cfg_path)
-        _mod  = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        return _mod
-    return None
+# def _load_config():
+#     _cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.py')
+#     if os.path.exists(_cfg_path):
+#         _spec = _ilu.spec_from_file_location("_app_config", _cfg_path)
+#         _mod  = _ilu.module_from_spec(_spec)
+#         _spec.loader.exec_module(_mod)
+#         return _mod
+#     return None
 
-_cfg = _load_config()
+# _cfg = _load_config()
 
 
 def required_env(name):
@@ -64,16 +63,6 @@ EMAIL_SENDER_NAME = os.getenv(
     'Daily Work Report System'
 )
 EMAIL_PASSWORD = required_env('EMAIL_PASSWORD')
-
-MANAGER_PIN = getattr(_cfg, 'MANAGER_PIN', None)
-MANAGER_PIN_HASH = getattr(_cfg, 'MANAGER_PIN_HASH', None)
-if MANAGER_PIN_HASH:
-    pass
-elif MANAGER_PIN:
-    MANAGER_PIN_HASH = bcrypt.hashpw(MANAGER_PIN.encode(), bcrypt.gensalt()).decode()
-else:
-    MANAGER_PIN_HASH = bcrypt.hashpw(b'1234', bcrypt.gensalt()).decode()
-MANAGER_EMAIL  = getattr(_cfg, 'MANAGER_EMAIL',   'manager@company.com')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # STAFF_CSV = os.path.join(BASE_DIR, 'staff.csv')
@@ -783,18 +772,29 @@ def auth_manager():
 
 
     db_hex_hash = verify_manager_pin_in_db()
-    if db_hex_hash:
-       input_hash = hashlib.md5(pin.encode()).hexdigest().upper()
+    if not db_hex_hash:
+        return jsonify({
+            'error': 'Manager PIN is not configured'
+        }), 503
+        
+    input_hash = hashlib.md5(pin.encode()).hexdigest().upper()
 
-       if input_hash == db_hex_hash:
+    if input_hash == db_hex_hash:
             return login_success()
     
-    if MANAGER_PIN_HASH:
-        input_hash = hashlib.md5(pin.encode()).hexdigest().upper()
-        if input_hash == MANAGER_PIN_HASH:
-            return login_success()
-    
-    return jsonify({'error': 'Incorrect PIN.'}), 401
+    input_hash = hashlib.md5(
+        pin.encode()
+    ).hexdigest().upper()
+
+    if hmac.compare_digest(
+        input_hash,
+        db_hex_hash.strip().upper()
+    ):
+        return login_success()
+
+    return jsonify({
+        'error': 'Incorrect PIN.'
+    }), 401
 
 @app.route(
     APP_ROOT + '/api/auth/superuser',
@@ -1017,7 +1017,7 @@ def create_programme():
         return error_response, status_code
     data = request.get_json(silent=True) or {}
     title = data.get('title', '').strip()
-    creator = data.get('createdBy', '').strip()
+    creator = session['id']
     if not title:
         return jsonify({'error': 'Title is required'}), 400
 
