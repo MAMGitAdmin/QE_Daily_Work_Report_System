@@ -52,7 +52,7 @@ def required_env(name):
 
 SYSTEM_URL = os.getenv(
     'SYSTEM_URL',
-    'http://127.0.0.1:5001/daily-report/'
+    'http://192.168.20.91/daily-report'
 ).rstrip('/') + '/'
 
 EMAIL_SMTP_HOST = required_env('EMAIL_SMTP_HOST')
@@ -209,8 +209,13 @@ def notify_programme_created(programme, creator_id):
     </p>
 
     <p style="color:#6b6b67;font-size:13px">
-        Log in to the Work Report System to view details.
-      </p>
+        Log in to the
+        <a href="{html_escape(SYSTEM_URL)}"
+            style="color:#2563eb;font-weight:600;text-decoration:none">
+            Daily Work Report System
+        </a>
+        to view the full report.
+        </p>
     </div>
     """
 
