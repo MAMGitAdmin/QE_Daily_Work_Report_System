@@ -2275,7 +2275,7 @@ function renderShell(content) {
     <div class="sidebar ${sidebarClass}" id="sidebar">
       <div class="sidebar-logo">
         <div class="logo-icon"><i class="ti ti-briefcase"></i></div>
-        <div><div class="logo-text">Daily Work Report</div><div class="logo-sub">Programme Tracker</div></div>
+        <div><div class="logo-text">Daily Work Report</div><div class="logo-sub">Highlight Tracker</div></div>
       </div>
       <div class="nav-group">
         <div class="nav-label">${isSuperuser?'Administration' : isManager?'Dashboard':'My Work'}</div>
@@ -2368,7 +2368,7 @@ function renderDetailTopActions() {
     actions.push(`<button class="btn btn-ghost btn-sm" id="btn-export-csv"><i class="ti ti-table-export"></i> CSV</button>`);
     actions.push(`<button class="btn btn-ghost btn-sm" id="btn-export-print"><i class="ti ti-printer"></i> Print/PDF</button>`);
   }
-  if (isSuperuser) {
+  if (isSuperuser || isCreator) {
     actions.push(`<button class="btn btn-danger btn-sm" id="btn-delete-prog"><i class="ti ti-trash"></i> Delete</button>`);
   }
   return actions.join('');
@@ -2396,7 +2396,7 @@ function renderStaffContent() {
       <select id="status-filter">${statusOptions(S.filterStatus)}</select>
     </div>
     ${filtered.length===0
-      ? `<div class="empty"><i class="ti ti-folders"></i><p>${mine.length===0?'No programmes yet — create one above.':'Nothing matches your filter.'}</p></div>`
+      ? `<div class="empty"><i class="ti ti-folders"></i><p>${mine.length===0?'No highlight yet — create one above.':'Nothing matches your filter.'}</p></div>`
       : filtered.map(p=>renderProgCard(p)).join('')}`;
 }
 
@@ -2486,7 +2486,7 @@ function renderDashboard() {
       <div>
         <h2 style="font-size:20px;font-weight:700;">Dashboard Summary</h2>
         <p style="color:var(--ink2);font-size:12px;margin-top:2px;">
-          ${dateRangeLabel} · ${programmeStats.total} programme${programmeStats.total !== 1 ? 's' : ''} · ${programmeStats.totalReports} report${programmeStats.totalReports !== 1 ? 's' : ''} total
+          ${dateRangeLabel} · ${programmeStats.total} highlight${programmeStats.total !== 1 ? 's' : ''} · ${programmeStats.totalReports} report${programmeStats.totalReports !== 1 ? 's' : ''} total
         </p>
       </div>
       <div style="display:flex;gap:8px;">
@@ -3071,7 +3071,7 @@ function renderReportCard(r, p) {
           ${statusBadge(r.status)}
           ${priorityBadge(pri)}
           ${(isSuperuser|| isOwn || (S.role==='staff' && (r.involvedStaff||[]).includes(S.user?.id)))?`<button class="btn-icon no-print btn-edit-report" data-report-id="${r.id}" title="Edit report"><i class="ti ti-pencil"></i></button>`:''}
-          ${(isSuperuser)?`<button class="btn-icon no-print btn-delete-report" data-report-id="${r.id}" data-prog-id="${p.id}" style="color:var(--red);border-color:var(--red-border)" title="Delete report"><i class="ti ti-trash"></i></button>`:''}
+          ${(isSuperuser || isOwn)?`<button class="btn-icon no-print btn-delete-report" data-report-id="${r.id}" data-prog-id="${p.id}" style="color:var(--red);border-color:var(--red-border)" title="Delete report"><i class="ti ti-trash"></i></button>`:''}
         </div>
       </div>
       <div class="rc-summary"><i class="ti ti-message"> </i>${esc(r.summary)}</div>
