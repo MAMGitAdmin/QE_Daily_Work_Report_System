@@ -21,7 +21,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+lib/*
+!lib/MAM_Encryption.dll
 lib64/
 parts/
 sdist/

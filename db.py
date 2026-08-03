@@ -1,11 +1,347 @@
 import pyodbc
-import os, csv, json
+import os, csv, json,uuid
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 
-import uuid
+load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EMAIL_SETTING_CODE = 'EMAIL_NOTIFICATION'
+ENCRYPTION_DLL_PATH = os.path.abspath(
+    os.getenv(
+        'ENCRYPTION_DLL_PATH',
+    os.path.join(BASE_DIR, 'lib','MAM_Encryption.dll')
+    )
+   
+)
+
+_mam_encryption = None
+
+def _get_mam_encryption():
+    """Load MAM_Encryption.dll once and return its public module."""
+
+    global _mam_encryption
+
+    if _mam_encryption is not None:
+        return _mam_encryption
+
+    if not os.path.isfile(ENCRYPTION_DLL_PATH):
+        raise RuntimeError(
+            f'MAM encryption DLL was not found: {ENCRYPTION_DLL_PATH}'
+        )
+
+    try:
+        import clr
+    except ImportError as exc:
+        raise RuntimeError(
+            'pythonnet is required to load MAM_Encryption.dll'
+        ) from exc
+
+    try:
+        clr.AddReference(ENCRYPTION_DLL_PATH)
+        from MTP import mod_General
+    except Exception as exc:
+        raise RuntimeError(
+            f'Unable to load MAM encryption DLL: {ENCRYPTION_DLL_PATH}'
+        ) from exc
+
+    _mam_encryption = mod_General
+    return _mam_encryption
+
+
+def encrypt_password(plain_password):
+    """Encrypt a password using MAM_Encryption.dll."""
+
+    if plain_password is None:
+        raise ValueError('Password cannot be None')
+
+    mam_encryption = _get_mam_encryption()
+
+    try:
+        encrypted = mam_encryption.Encrypt(str(plain_password))
+    except Exception as exc:
+        raise RuntimeError(
+            'MAM password encryption failed'
+        ) from exc
+
+    if encrypted is None:
+        raise RuntimeError(
+            'MAM password encryption returned an empty result'
+        )
+
+    return str(encrypted)
+
+
+def decrypt_password(encrypted_password):
+    """Decrypt a DWR_PWD value using MAM_Encryption.dll."""
+
+    if encrypted_password is None:
+        raise ValueError('Encrypted password cannot be None')
+
+    encrypted_password = str(encrypted_password).strip()
+
+    if not encrypted_password:
+        raise ValueError('Encrypted password cannot be empty')
+
+    mam_encryption = _get_mam_encryption()
+
+    try:
+        decrypted = mam_encryption.Decrypt(encrypted_password)
+    except Exception as exc:
+        raise RuntimeError(
+            'MAM password decryption failed'
+        ) from exc
+
+    if decrypted is None:
+        raise RuntimeError(
+            'MAM password decryption returned an empty result'
+        )
+
+    return str(decrypted)
+
+def get_user_encrypted_password_in_db(user_id):
+    """Retrieve the current encrypted DWR_PWD for an active user."""
+
+    conn = None
+    cursor = None
+
+    try:
+        clean_user_id = str(user_id or '').strip()
+
+        if not clean_user_id:
+            return None
+
+        conn = get_mamsys_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT DWR_PWD
+            FROM TBL_USR
+            WHERE USR_ID = ?
+              AND USR_STS = 'A'
+              AND DWR_PWD IS NOT NULL
+              AND LTRIM(RTRIM(DWR_PWD)) <> ''
+              AND LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive'
+        """, (clean_user_id,))
+
+        row = cursor.fetchone()
+
+        if not row or not row.DWR_PWD:
+            return None
+
+        return str(row.DWR_PWD).strip()
+
+    except Exception as exc:
+        print(
+            f'[DB ERROR] Unable to retrieve user password: {exc}'
+        )
+        return None
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if conn is not None:
+            conn.close()
+
+
+def change_user_password_in_db(
+    user_id,
+    current_encrypted_password,
+    new_encrypted_password
+):
+    """
+    Change DWR_PWD only when the current encrypted value still matches.
+
+    Checking the previous value prevents another request from
+    overwriting a password that was changed concurrently.
+    """
+
+    conn = None
+    cursor = None
+
+    try:
+        clean_user_id = str(user_id or '').strip()
+        current_encrypted = str(
+            current_encrypted_password or ''
+        ).strip()
+        new_encrypted = str(
+            new_encrypted_password or ''
+        ).strip()
+
+        if (
+            not clean_user_id
+            or not current_encrypted
+            or not new_encrypted
+        ):
+            return False
+
+        conn = get_mamsys_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE TBL_USR
+            SET DWR_PWD = ?
+            WHERE USR_ID = ?
+              AND USR_STS = 'A'
+              AND DWR_PWD = ?
+        """, (
+            new_encrypted,
+            clean_user_id,
+            current_encrypted
+        ))
+
+        changed = cursor.rowcount == 1
+        conn.commit()
+
+        return changed
+
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+
+        print(
+            f'[DB ERROR] Unable to change user password: {exc}'
+        )
+
+        raise
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if conn is not None:
+            conn.close()
+
+def get_staff_auth_record(user_id):
+    """Retrieve a normal staff record for authentication."""
+
+    conn = None
+    cursor = None
+
+    try:
+        clean_user_id = str(user_id or '').strip()
+
+        if not clean_user_id:
+            return None
+
+        conn = get_mamsys_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                USR_ID,
+                USR_NAME,
+                USR_MAIL,
+                DWR_PWD
+            FROM TBL_USR
+            WHERE USR_ID = ?
+              AND USR_STS = 'A'
+              AND USR_DEPT IN ('QE', 'MIS')
+              AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%')
+              AND (
+                    VC_USR_ROLE IS NULL
+                    OR VC_USR_ROLE <> 'MANAGER'
+                  )
+              AND (
+                    DWR_PWD IS NULL
+                    OR LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive'
+                  )
+        """, (clean_user_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        encrypted_password = None
+
+        if row.DWR_PWD is not None:
+            encrypted_password = str(row.DWR_PWD).strip() or None
+
+        return {
+            'id': str(row.USR_ID).strip(),
+            'name': str(row.USR_NAME).strip(),
+            'email': str(row.USR_MAIL or '').strip(),
+            'encrypted_password': encrypted_password
+        }
+
+    except Exception as exc:
+        print(
+            f'[DB ERROR] Unable to retrieve staff credentials: {exc}'
+        )
+        return None
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if conn is not None:
+            conn.close()
+
+
+def create_staff_password_in_db(user_id, encrypted_password):
+    """
+    Create a first-time staff password.
+
+    Existing passwords cannot be changed using this function.
+    """
+
+    conn = None
+    cursor = None
+
+    try:
+        clean_user_id = str(user_id or '').strip()
+        clean_password = str(encrypted_password or '').strip()
+
+        if not clean_user_id or not clean_password:
+            return False
+
+        conn = get_mamsys_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE TBL_USR
+            SET DWR_PWD = ?
+            WHERE USR_ID = ?
+              AND USR_STS = 'A'
+              AND USR_DEPT IN ('QE', 'MIS')
+              AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%')
+              AND (
+                    VC_USR_ROLE IS NULL
+                    OR VC_USR_ROLE <> 'MANAGER'
+                  )
+              AND (
+                    DWR_PWD IS NULL
+                    OR LTRIM(RTRIM(DWR_PWD)) = ''
+                  )
+        """, (
+            clean_password,
+            clean_user_id
+        ))
+
+        password_created = cursor.rowcount == 1
+
+        conn.commit()
+
+        return password_created
+
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+
+        print(
+            f'[DB ERROR] Unable to create staff password: {exc}'
+        )
+
+        raise
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if conn is not None:
+            conn.close()
 
 def _to_dt(value):
     if not value:
@@ -62,7 +398,7 @@ def load_staff_from_db():
         cursor.execute("""
             SELECT USR_ID, USR_NAME, USR_MAIL
             FROM TBL_USR 
-            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%') AND ( USR_PIN_HASH IS NULL OR LOWER(LTRIM(RTRIM(USR_PIN_HASH))) <> 'inactive')
+            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%') AND ( DWR_PWD IS NULL OR LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive')
         """)
         
         for row in cursor.fetchall():
@@ -92,7 +428,7 @@ def find_staff_in_db(user_id):
         cursor.execute("""
             SELECT USR_ID, USR_NAME, USR_MAIL
             FROM TBL_USR 
-            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE', 'MIS') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%')  AND ( USR_PIN_HASH IS NULL OR LOWER(LTRIM(RTRIM(USR_PIN_HASH))) <> 'inactive') AND USR_ID = ?
+            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE', 'MIS') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%')  AND ( DWR_PWD IS NULL OR LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive') AND USR_ID = ?
         """, (user_id,))
         
         row = cursor.fetchone()
@@ -106,56 +442,11 @@ def find_staff_in_db(user_id):
     
     return None
 
-def verify_manager_pin_in_db():
-  
-    try:
-        conn = get_mamsys_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT USR_PIN_HASH
-            FROM TBL_USR 
-            WHERE VC_USR_ROLE = 'MANAGER' AND USR_STS = 'A'
-        """)
-        
-        row = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if row and row.USR_PIN_HASH:
-            return row.USR_PIN_HASH.strip()
-    except Exception as e:
-        print(f"[DB ERROR] {e}")
-    
-    return None
+def load_managers_for_auth():
+    """
+    Return all active managers with an encrypted DWR_PWD.
+    """
 
-def load_manager_from_db():
-  
-    try:
-        conn = get_mamsys_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT USR_ID, USR_NAME
-            FROM TBL_USR 
-            WHERE VC_USR_ROLE = 'MANAGER' AND USR_PIN_HASH IS NOT NULL AND USR_STS = 'A'
-        """)
-        
-        row = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if row:
-            return { 
-                'id': row.USR_ID,
-                'name': row.USR_NAME
-            }
-    except Exception as e:
-        print(f"[DB ERROR] {e}")
-    
-    return None
-
-def find_superuser_in_db(user_id):
     conn = None
     cursor = None
 
@@ -164,32 +455,104 @@ def find_superuser_in_db(user_id):
         cursor = conn.cursor()
 
         cursor.execute("""
-                       SELECT USR_ID,USR_NAME,USR_MAIL
-                       FROM TBL_USR WHERE USR_ID=? AND USR_DEPT = 'MIS' AND USR_STS='A'
-                       """, (str(user_id).strip(),))
-        
-        row = cursor.fetchone()
+            SELECT
+                USR_ID,
+                USR_NAME,
+                USR_MAIL,
+                DWR_PWD
+            FROM TBL_USR
+            WHERE VC_USR_ROLE LIKE '%MANAGER%'
+              AND USR_STS = 'A'
+              AND DWR_PWD IS NOT NULL
+              AND LTRIM(RTRIM(DWR_PWD)) <> ''
+              AND LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive'
+            ORDER BY USR_ID
+        """)
 
-        if not row:
-            return None
-        
-        return {
-            'id': str(row.USR_ID).strip(),
-            'name': row.USR_NAME or '',
-            'email': row.USR_MAIL or '',
-        }
+        managers = []
 
-    except Exception as error:
-        print(f"[DB ERROR] find_superuser_in_db: {error}")
-        return None
-    
-    finally: 
+        for row in cursor.fetchall():
+            managers.append({
+                'id': str(row.USR_ID).strip(),
+                'name': str(row.USR_NAME or '').strip(),
+                'email': str(row.USR_MAIL or '').strip(),
+                'encrypted_password': str(
+                    row.DWR_PWD
+                ).strip()
+            })
+
+        return managers
+
+    except Exception as exc:
+        print(
+            f'[DB ERROR] Unable to load managers: {exc}'
+        )
+
+        return []
+
+    finally:
         if cursor is not None:
             cursor.close()
 
         if conn is not None:
             conn.close()
 
+def load_superusers_for_auth():
+    """
+    Return active MIS superusers that have an encrypted DWR_PWD.
+
+    DWR_PWD is returned only for server-side authentication.
+    """
+
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_mamsys_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                USR_ID,
+                USR_NAME,
+                USR_MAIL,
+                DWR_PWD
+            FROM TBL_USR
+            WHERE USR_DEPT = 'MIS'
+              AND USR_STS = 'A'
+              AND DWR_PWD IS NOT NULL
+              AND LTRIM(RTRIM(DWR_PWD)) <> ''
+              AND LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive'
+              AND VC_USR_ROLE = 'SUPERUSER'
+        """)
+
+        superusers = []
+
+        for row in cursor.fetchall():
+            superusers.append({
+                'id': str(row.USR_ID).strip(),
+                'name': str(row.USR_NAME).strip(),
+                'email': str(row.USR_MAIL or '').strip(),
+                'encrypted_password': str(
+                    row.DWR_PWD
+                ).strip()
+            })
+
+        return superusers
+
+    except Exception as exc:
+        print(
+            f'[DB ERROR] Unable to load superusers: {exc}'
+        )
+
+        return []
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if conn is not None:
+            conn.close()
                        
 
 def load_staff_maps():

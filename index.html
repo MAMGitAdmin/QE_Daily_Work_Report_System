@@ -544,6 +544,39 @@ body { font-family: var(--font); background: var(--bg); color: var(--ink); min-h
 }
 
 .sidebar-bottom { margin-top: auto; padding: 0.75rem 0.6rem 0; border-top: 1px solid var(--border); }
+.sidebar-bottom {
+  margin-top: auto;
+  padding: 0.75rem 0.6rem 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sidebar-actions .nav-item {
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.sidebar-actions .nav-item > i,
+.sidebar-action-label > i {
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.sidebar-action-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 /* ─── SIDEBAR TOGGLE ─── */
 .sidebar-toggle {
   display: none;
@@ -1187,8 +1220,16 @@ let S = {
   editProgMode: false, editProgDraft: { title:'', assignedStaff:[] },
   showEditProgStaffDD: false,
   statusEditMode: false,
+  
   selectedRole: null, loginName:'', loginPin:'', loginError:'', loginNameError:'', loginPinError:'',
+  loginPasswordError: '',
+  loginMessage: '',
+  staffPasswordSetup: false,
+  staffSetupError: '',
   showPin: false,
+  loginSuperuserPinError: '',
+  showSuperuserPin: false,
+
   search:'', filterStatus:'',
   staffQ: { prog:'', report:'', editProg:'' },
   confirm: null,
@@ -1596,7 +1637,14 @@ async function api(method, path, body) {
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
   const data = await res.json().catch(()=>({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok){
+    const error = new Error(
+      data.error || `HTTP ${res.status}`
+    );
+    error.status = res.status;
+    error.code = data.code || null;
+    throw error;
+  } 
   return data;
 }
 async function loadAll() {
@@ -1663,6 +1711,158 @@ function renderLogin() {
   // Step indicator
   const step = S.selectedRole ? 2 : 1;
   const stepLabel = step === 1 ? 'Step 1 of 2 — Choose your role' : 'Step 2 of 2 — Enter your details';
+  const staffBlock = S.staffPasswordSetup ? `
+  <div class="form-group">
+    <label class="form-label">Staff ID</label>
+
+    <input
+      type="text"
+      id="setup-staff-id"
+      placeholder="e.g. S1234"
+      value="${esc(S.loginName)}"
+      autocomplete="username"
+    />
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">Create password</label>
+
+    <input
+      type="password"
+      id="setup-password"
+      placeholder="Enter a password"
+      autocomplete="new-password"
+    />
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">Confirm password</label>
+
+    <input
+      type="password"
+      id="setup-confirm-password"
+      placeholder="Enter the same password again"
+      autocomplete="new-password"
+    />
+  </div>
+
+  ${S.staffSetupError ? `
+    <p class="field-err">
+      <i class="ti ti-alert-circle"></i>
+      ${esc(S.staffSetupError)}
+    </p>
+  ` : ''}
+
+  <button
+    class="btn btn-primary"
+    id="btn-create-staff-password"
+    style="width:100%;justify-content:center"
+  >
+    Create Password
+  </button>
+
+  <button
+    class="btn"
+    id="btn-cancel-password-setup"
+    style="width:100%;justify-content:center;margin-top:8px"
+  >
+    Back to Login
+  </button>
+` : `
+  <div class="form-group">
+    <label class="form-label">Staff ID</label>
+
+    <input
+      type="text"
+      id="login-name"
+      placeholder="e.g. S1234"
+      value="${esc(S.loginName)}"
+      autocomplete="username"
+      class="${S.loginNameError ? 'input-error' : ''}"
+    />
+
+    ${S.loginNameError ? `
+      <p class="field-err">
+        <i class="ti ti-alert-circle"></i>
+        ${esc(S.loginNameError)}
+      </p>
+    ` : ''}
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">Password</label>
+
+    <input
+      type="password"
+      id="login-password"
+      placeholder="Enter your password"
+      autocomplete="current-password"
+      class="${S.loginPasswordError ? 'input-error' : ''}"
+    />
+
+    ${S.loginPasswordError ? `
+      <p class="field-err">
+        <i class="ti ti-alert-circle"></i>
+        ${esc(S.loginPasswordError)}
+      </p>
+    ` : ''}
+  </div>
+
+  ${S.loginMessage ? `
+  <div style="
+    display:flex;
+    align-items:flex-start;
+    gap:8px;
+    padding:10px 12px;
+    margin-bottom:12px;
+    color:#22c55e;
+    background:rgba(34,197,94,0.12);
+    border:1px solid rgba(34,197,94,0.45);
+    border-radius:8px;
+    font-size:12px;
+    line-height:1.5;
+  ">
+    <i
+      class="ti ti-circle-check"
+      style="
+        font-size:17px;
+        flex-shrink:0;
+        margin-top:1px;
+      "
+    ></i>
+
+    <span>${esc(S.loginMessage)}</span>
+  </div> 
+  
+  ` : ''}
+
+  <button
+    class="btn btn-primary"
+    id="btn-staff-login"
+    style="width:100%;justify-content:center"
+  >
+    Login
+  </button>
+
+  <button
+    class="btn"
+    id="btn-show-password-setup"
+    style="width:100%;justify-content:center;margin-top:8px"
+  >
+    First-time user / Create Password
+  </button>
+
+  <p style="font-size:11.5px;color:var(--ink3);text-align:center;margin-top:10px">
+    Not staff?
+    <span
+      style="color:var(--accent2);cursor:pointer"
+      id="btn-switch-role"
+    >
+      Switch role
+    </span>
+  </p>
+`;
+
   const stepsHtml = `
     <div class="login-steps">
       <div class="login-step-dot active"></div>
@@ -1690,21 +1890,45 @@ function renderLogin() {
     </p>` :
     S.selectedRole === 'superuser' ? `
   <div class="form-group">
-    <label class="form-label">MIS Staff ID</label>
+    <label class="form-label">Admin Pin</label>
+  
+    <div class="pin-input-wrap">
+     <input
+        type="${S.showSuperuserPin ? 'text' : 'password'}"
+        id="login-superuser-pin"
+        placeholder="Enter PIN"
+        autocomplete="current-password"
+        class="${
+          S.loginSuperuserPinError
+            ? 'input-error'
+            : ''
+        }"
+      />
 
-    <input
-      type="text"
-      id="login-superuser-id"
-      placeholder="Enter your MIS Staff ID"
-      value="${esc(S.loginName)}"
-      autocomplete="off"
-      class="${S.loginNameError ? 'input-error' : ''}"
-    />
+      <button
+        class="pin-toggle-btn"
+        id="btn-superuser-pin-toggle"
+        type="button"
+        tabindex="-1"
+        title="${
+          S.showSuperuserPin
+            ? 'Hide PIN'
+            : 'Show PIN'
+        }"
+      >
+        <i class="ti ${
+          S.showSuperuserPin
+            ? 'ti-eye-off'
+            : 'ti-eye'
+        }"></i>
+      </button>
 
-    ${S.loginNameError ? `
+      </div>
+
+ ${S.loginSuperuserPinError ? `
       <p class="field-err">
         <i class="ti ti-alert-circle"></i>
-        ${esc(S.loginNameError)}
+        ${esc(S.loginSuperuserPinError)}
       </p>
     ` : ''}
   </div>
@@ -1719,7 +1943,7 @@ function renderLogin() {
   </button>
 
   <p style="font-size:11.5px;color:var(--ink3);text-align:center;margin-top:10px">
-    Not a superuser?
+    Not a admin?
     <span
       style="color:var(--accent2);cursor:pointer"
       id="btn-switch-role"
@@ -1728,21 +1952,8 @@ function renderLogin() {
     </span>
   </p>
 ` :
-  S.selectedRole==='staff' ? `
-    <div class="form-group">
-      <label class="form-label">Your Staff ID</label>
-      <input type="text" id="login-name" placeholder="e.g. S1234" value="${esc(S.loginName)}" autocomplete="off" class="${S.loginNameError ? 'input-error' : ''}" />
-      ${S.loginNameError ? `<p class="field-err"><i class="ti ti-alert-circle" style="font-size:13px"></i>${esc(S.loginNameError)}</p>` : ''}
-    </div>
-    <button class="btn btn-primary" id="btn-staff-login" style="width:100%;justify-content:center;margin-top:4px">
-      <i class="ti ti-arrow-right"></i> Continue
-    </button>
-    <p style="font-size:11.5px;color:var(--ink3);text-align:center;margin-top:10px">
-      Not staff? <span style="color:var(--accent2);cursor:pointer" id="btn-switch-role">Switch role</span>
-    </p>` : '';
-
-    
-
+  S.selectedRole==='staff' ? staffBlock : '';
+  
   return /*html*/ `
   <div class="login-wrap">
         <button class="theme-toggle-login" id="theme-toggle">
@@ -1929,7 +2140,7 @@ function renderEmailAdminContent() {
 
       ${toggle(
         'setting-programme-created',
-        'Programme created',
+        'Highlight created',
         'Notify assigned staff and the manager.',
         settings.notifyProgrammeCreated
       )}
@@ -1943,7 +2154,7 @@ function renderEmailAdminContent() {
 
       ${toggle(
         'setting-status-updated',
-        'Programme updated',
+        'Highlight updated',
         'Notify assigned staff and the manager when programme details, staff or status change.',
         settings.notifyStatusUpdated
       )}
@@ -1963,7 +2174,7 @@ function renderEmailAdminContent() {
         <input
           type="text"
           id="setting-manager-email"
-          placeholder="manager@company.com"
+          placeholder="manager@minaik.com"
           value="${esc(settings.managerEmail || '')}"
         />
 
@@ -2029,7 +2240,7 @@ function renderSuperuserContent() {
   <div class="toolbar no-print" style="justify-content:flex-start">
     <button type="button" id="btn-superuser-programmes" class="btn ${section === 'programmes'? 'btn-primary': 'btn-ghost'}">
       <i class="ti ti-layout-grid"></i>
-      All programmes
+      All Highlights
       </button>
 
       <button type="button" id="btn-superuser-email" class="btn ${section=== 'email' ? 'btn-primary' : 'btn-ghost' }">
@@ -2075,10 +2286,10 @@ function renderShell(content) {
           <i class="ti ti-layout-grid"></i>
 
           ${isSuperuser
-            ? 'Superuser Access'
+            ? 'Admin Access'
             : isManager
-              ? 'All Programmes'
-              : 'My Programmes'}
+              ? 'All Highlights'
+              : 'My Highlights'}
         </button>
 
         ${!isSuperuser ? `
@@ -2086,15 +2297,33 @@ function renderShell(content) {
           <i class="ti ti-chart-bar"></i> Dashboard
         </button>
         ` : ''}
+
+        
       </div>
       <div class="sidebar-bottom">
         <div class="user-chip">
           <div class="user-avatar">${initials(S.user?.name||'M')}</div>
               <div class="user-details"> 
               <div class="user-name" title="${esc(S.user.name)}">${esc(S.user?.name||'Manager')}</div>
-              <div class="user-role-tag">${isSuperuser?'Superuser': isManager? 'Manager':'Staff'}</div>
+              <div class="user-role-tag">${isSuperuser?'Admin': isManager? 'Manager':'Staff'}</div>
              </div>
         </div>
+         
+         ${S.user ? `
+        <button
+          type="button"
+          class="nav-item"
+          id="btn-change-password"
+        >
+          <i class="ti ti-key"></i>
+          ${
+            S.role === 'staff'
+              ? 'Change Password'
+              : 'Change PIN'
+          }
+        </button>
+      ` : ''}
+
         <button class="nav-item theme-toggle-btn" id="theme-toggle" style="justify-content: space-between;">
           <span><i class="ti ${theme === 'day' ? 'ti-sun' : 'ti-moon'}"></i> ${theme === 'day' ? 'Light Mode' : 'Dark Mode'}</span>
           <span class="theme-toggle-switch" style="display: inline-block; width: 32px; height: 16px; background: var(--border2); border-radius: 16px; position: relative;">
@@ -2102,7 +2331,10 @@ function renderShell(content) {
           </span>
         </button>
 
-        <button class="nav-item" id="btn-logout"><i class="ti ti-logout"></i> Log out</button>
+       
+        
+
+        <button class="nav-item" id="btn-logout"><i class="ti ti-logout"></i> <span>Log out</span></button>
       </div>
     </div>
     <div class="main">
@@ -2111,13 +2343,13 @@ function renderShell(content) {
           ${S.detailId?`<button class="btn btn-ghost btn-sm no-print" id="btn-back"><i class="ti ti-arrow-left"></i></button>`:''}
           <span class="topbar-title">${S.detailId ? esc(S.programmes.find(p=>p.id===S.detailId)?.title||'Programme') : (isSuperuser? (
       S.superuserSection === 'programmes'
-        ? 'All Programmes'
+        ? 'All Highlights'
         : 'Email Administration'
-    ) : isManager?'All Programmes':'My Programmes')}</span>
+    ) : isManager?'All Highlights':'My Highlights')}</span>
         </div>
         <div class="topbar-right no-print">
           ${S.detailId ? renderDetailTopActions() : ''}
-          ${!S.detailId && S.role === 'staff' && S.navView === 'programmes'? `<button class="btn btn-primary btn-sm" id="btn-show-new-prog"><i class="ti ti-plus"></i> New Programme</button>` : ''}
+          ${!S.detailId && S.role === 'staff' && S.navView === 'programmes'? `<button class="btn btn-primary btn-sm" id="btn-show-new-prog"><i class="ti ti-plus"></i> New Highlight</button>` : ''}
         </div>
       </div>
       <div class="page-content">${content}</div>
@@ -2160,7 +2392,7 @@ function renderStaffContent() {
    
     ${S.showNewProg ? renderNewProgForm() : ''}
     <div class="toolbar no-print">
-      <input type="text" id="search-box" placeholder="Search programmes by title or staff…" value="${esc(S.search)}" />
+      <input type="text" id="search-box" placeholder="Search highlights by title or staff…" value="${esc(S.search)}" />
       <select id="status-filter">${statusOptions(S.filterStatus)}</select>
     </div>
     ${filtered.length===0
@@ -2259,7 +2491,7 @@ function renderDashboard() {
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost btn-sm" id="btn-back-to-programmes">
-          <i class="ti ti-arrow-left"></i> Back to My Programmes
+          <i class="ti ti-arrow-left"></i> Back to My Highlights
         </button>
       </div>
     </div>
@@ -2332,14 +2564,14 @@ function renderDashboard() {
       <div class="dashboard-stat">
         <span class="stat-icon"><i class="ti ti-files"></i></span>
         <div class="stat-number">${programmeStats.total}</div>
-        <div class="stat-label">Total Programmes</div>
+        <div class="stat-label">Total Highlights</div>
         <span class="stat-change up">${programmeStats.totalReports} reports total</span>
       </div>
       <div class="dashboard-stat">
         <span class="stat-icon"><i class="ti ti-users"></i></span>
         <div class="stat-number">${programmeStats.uniqueStaff}</div>
         <div class="stat-label">Team Members</div>
-        <span class="stat-change up">across all programmes</span>
+        <span class="stat-change up">across all highlights</span>
       </div>
       <div class="dashboard-stat">
         <span class="stat-icon"><i class="ti ti-chart-line"></i></span>
@@ -2462,7 +2694,7 @@ function renderDashboard() {
     <!-- Status Distribution -->
     <div class="dashboard-charts">
       <div class="chart-card">
-        <div class="chart-title"><i class="ti ti-pie-chart"></i> Programme Status Distribution</div>
+        <div class="chart-title"><i class="ti ti-pie-chart"></i> Highlights Status Distribution</div>
         <div class="status-breakdown">
           <div class="status-breakdown-item">
             <span class="dot" style="background:#b45309;"></span>
@@ -2483,7 +2715,7 @@ function renderDashboard() {
       </div>
       
       <div class="chart-card">
-        <div class="chart-title"><i class="ti ti-list"></i> Programme Overview</div>
+        <div class="chart-title"><i class="ti ti-list"></i> Highlight Overview</div>
         <div style="max-height:120px;overflow-y:auto;">
           ${programmes.slice(0, 10).map(p => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;">
@@ -2497,10 +2729,10 @@ function renderDashboard() {
       </div>
     </div>
 
-    <!-- Recent Programme Activity -->
+    <!-- Recent HighlightActivity -->
     ${programmesWithReports.length > 0 ? `
     <div class="card" style="margin-top:4px;">
-      <div class="sec-label" style="margin-bottom:8px;"><i class="ti ti-clock"></i> Recent Programme Activity</div>
+      <div class="sec-label" style="margin-bottom:8px;"><i class="ti ti-clock"></i> Recent Highlight Activity</div>
       ${programmesWithReports.map(p => {
         const latestReports = [...(p.dailyReports || [])].sort((a, b) => String(b.submittedAt || '') .localeCompare(String(a.submittedAt || ''))).slice(0, 2);
         return `
@@ -2714,7 +2946,7 @@ function renderProgCard(p) {
 // ── PROGRAMME DETAIL ───────────────────────────────────────────────────────
 function renderProgDetail() {
   const p = S.programmes.find(x=>x.id===S.detailId);
-  if (!p) return /*html*/ `<div class="empty"><i class="ti ti-alert-circle"></i><p>Programme not found.</p></div>`;
+  if (!p) return /*html*/ `<div class="empty"><i class="ti ti-alert-circle"></i><p>Highlight not found.</p></div>`;
 
   const reports = (p.dailyReports||[]).slice().sort((a,b)=>b.submittedAt.localeCompare(a.submittedAt));
   const isStaff = S.role==='staff';
@@ -2748,7 +2980,7 @@ function renderProgDetail() {
     staffSection = `
       <div class="form-row" style="margin-top:10px">
         <div class="form-group">
-          <div class="form-label">Programme title</div>
+          <div class="form-label">Highlight title</div>
           <input type="text" id="edit-prog-title" value="${esc(draft.title)}" />
         </div>
         <div class="form-group">
@@ -2771,13 +3003,13 @@ function renderProgDetail() {
   } else {
     staffSection = `
       <div class="staff-tags" style="margin-top:9px">${(p.assignedStaff||[]).map(s=>`<span class="staff-tag"><i class="ti ti-user" style="font-size:10px"></i> ${esc(staffName(s))}</span>`).join('')}</div>
-      ${(isSuperuser || isManager || (isStaff && p.createdBy === S.user?.id)) ? `<button class="btn btn-ghost btn-xs no-print" id="btn-edit-prog" style="margin-top:8px"><i class="ti ti-pencil"></i> Edit programme</button>` : ''}`;
+      ${(isSuperuser || isManager || (isStaff && p.createdBy === S.user?.id)) ? `<button class="btn btn-ghost btn-xs no-print" id="btn-edit-prog" style="margin-top:8px"><i class="ti ti-pencil"></i> Edit highlight</button>` : ''}`;
   }
 
   return /*html*/ `
   <div class="print-header">
     <h1>${esc(p.title)}</h1>
-    <p>Programme report · Printed ${fmtDateTime(new Date().toISOString())} · ${(p.assignedStaff||[]).map(staffName).join(', ')}</p>
+    <p>Highlight report · Printed ${fmtDateTime(new Date().toISOString())} · ${(p.assignedStaff||[]).map(staffName).join(', ')}</p>
   </div>
 
   <div class="card" style="margin-bottom:1rem">
@@ -2921,7 +3153,7 @@ function renderNewProgForm() {
   const avail = S.allStaff.filter(s=>s.id!==S.user.id&&!sel.includes(s.id)&&s.name.toLowerCase().includes(S.staffQ.prog.toLowerCase()));
   return /*html*/ `
   <div class="new-prog-box">
-    <div class="sec-label" style="margin-bottom:0.9rem">New Programme</div>
+    <div class="sec-label" style="margin-bottom:0.9rem">New Highlight</div>
     <div class="form-group">
       <label class="form-label">Title *</label>
       <input type="text" id="np-title" placeholder="e.g. Q3 Financial Audit" value="${esc(S.newProg.title)}" />
@@ -3162,6 +3394,248 @@ function openFilePreview(file) {
   };
 }
 
+function openChangePasswordDialog() {
+  const existing =
+    document.getElementById('change-password-overlay');
+
+  if (existing) {
+    existing.remove();
+  }
+
+  const isPin =
+    S.role === 'manager' ||
+    S.role === 'superuser';
+
+  const credentialLabel =
+    isPin ? 'PIN' : 'Password';
+
+  const overlay = document.createElement('div');
+
+  overlay.id = 'change-password-overlay';
+
+  overlay.style.cssText = `
+    position:fixed;
+    inset:0;
+    z-index:9999;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+    background:rgba(0,0,0,0.65);
+  `;
+
+  overlay.innerHTML = `
+    <div
+      class="dialog-box"
+      style="width:100%;max-width:420px"
+    >
+      <div class="dialog-title">
+        Change ${credentialLabel}
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          Current ${credentialLabel}
+        </label>
+
+        <input
+          type="password"
+          id="change-current-password"
+          autocomplete="current-password"
+          placeholder="Enter current ${credentialLabel.toLowerCase()}"
+        />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          New ${credentialLabel}
+        </label>
+
+        <input
+          type="password"
+          id="change-new-password"
+          autocomplete="new-password"
+          placeholder="Enter new ${credentialLabel.toLowerCase()}"
+        />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          Confirm New ${credentialLabel}
+        </label>
+
+        <input
+          type="password"
+          id="change-confirm-password"
+          autocomplete="new-password"
+          placeholder="Enter the same value again"
+        />
+      </div>
+
+      <div
+        id="change-password-error"
+        class="field-err"
+        style="display:none;margin-bottom:12px"
+      >
+        <i class="ti ti-alert-circle"></i>
+        <span></span>
+      </div>
+
+      <div
+        id="change-password-success"
+        style="
+          display:none;
+          align-items:center;
+          gap:8px;
+          padding:10px 12px;
+          margin-bottom:12px;
+          color:#22c55e;
+          background:rgba(34,197,94,0.12);
+          border:1px solid rgba(34,197,94,0.45);
+          border-radius:8px;
+          font-size:12px;
+        "
+      >
+        <i class="ti ti-circle-check"></i>
+        <span></span>
+      </div>
+
+      <div class="dialog-btns">
+        <button
+          type="button"
+          class="btn btn-ghost"
+          id="btn-cancel-change-password"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          class="btn btn-primary"
+          id="btn-submit-change-password"
+        >
+          Change ${credentialLabel}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const currentInput =
+    document.getElementById('change-current-password');
+
+  const newInput =
+    document.getElementById('change-new-password');
+
+  const confirmInput =
+    document.getElementById('change-confirm-password');
+
+  const errorBox =
+    document.getElementById('change-password-error');
+
+  const successBox =
+    document.getElementById('change-password-success');
+
+  const submitButton =
+    document.getElementById('btn-submit-change-password');
+
+  const closeDialog = () => {
+    overlay.remove();
+  };
+
+  document.getElementById(
+    'btn-cancel-change-password'
+  ).onclick = closeDialog;
+
+  const showError = message => {
+    successBox.style.display = 'none';
+    errorBox.style.display = 'flex';
+    errorBox.querySelector('span').textContent = message;
+  };
+
+  const submitChange = async () => {
+    const current_password = currentInput.value;
+    const new_password = newInput.value;
+    const confirm_password = confirmInput.value;
+
+    errorBox.style.display = 'none';
+    successBox.style.display = 'none';
+
+    if (!current_password) {
+      showError(
+        `Current ${credentialLabel.toLowerCase()} is required.`
+      );
+
+      currentInput.focus();
+      return;
+    }
+
+    if (!new_password) {
+      showError(
+        `New ${credentialLabel.toLowerCase()} is required.`
+      );
+
+      newInput.focus();
+      return;
+    }
+
+    if (new_password !== confirm_password) {
+      showError(
+        `New ${credentialLabel.toLowerCase()}s do not match.`
+      );
+
+      confirmInput.focus();
+      return;
+    }
+
+    submitButton.disabled = true;
+
+    try {
+      const result = await api(
+        'POST',
+        '/api/auth/change-password',
+        {
+          current_password,
+          new_password,
+          confirm_password
+        }
+      );
+
+      currentInput.value = '';
+      newInput.value = '';
+      confirmInput.value = '';
+
+      successBox.style.display = 'flex';
+      successBox.querySelector('span').textContent =
+        result.message;
+
+      setTimeout(closeDialog, 1500);
+
+    } catch (error) {
+      showError(error.message);
+    } finally {
+      submitButton.disabled = false;
+    }
+  };
+
+  submitButton.onclick = submitChange;
+
+  confirmInput.onkeydown = event => {
+    if (event.key === 'Enter') {
+      submitChange();
+    }
+  };
+
+  overlay.onclick = event => {
+    if (event.target === overlay) {
+      closeDialog();
+    }
+  };
+
+  currentInput.focus();
+}
+
 // ── BIND ───────────────────────────────────────────────────────────────────
 function bind() {
   const $ = id => document.getElementById(id);
@@ -3220,6 +3694,14 @@ function bind() {
       render();
     };
   }
+
+  const changePasswordButton =
+  $('btn-change-password');
+
+if (changePasswordButton) {
+  changePasswordButton.onclick =
+    openChangePasswordDialog;
+}
 
 // ── DASHBOARD BINDING ─────────────────────────────────────────────────────
 
@@ -3427,8 +3909,19 @@ initSidebar();
 window.onresize = initSidebar;
   // Switch role link
   const switchRole=$('btn-switch-role');
-  if(switchRole) switchRole.onclick=()=>{ S.selectedRole=null; S.loginNameError=''; S.loginPinError=''; render(); };
+  if (switchRole) {
+    switchRole.onclick = () => {
+      S.selectedRole = null;
+      S.loginNameError = '';
+      S.loginPinError = '';
+      S.loginPasswordError = '';
+      S.loginMessage = '';
+      S.staffPasswordSetup = false;
+      S.staffSetupError = '';
 
+      render();
+    };
+  }
   // IMPROVEMENT 5: PIN show/hide toggle
   const pinToggle=$('btn-pin-toggle');
   if(pinToggle) pinToggle.onclick=()=>{ S.showPin=!S.showPin; render(); setTimeout(()=>{ const el=$('login-pin'); if(el){el.focus();const l=el.value.length;el.setSelectionRange(l,l);} },50); };
@@ -3463,59 +3956,350 @@ window.onresize = initSidebar;
   const pinEl=$('login-pin');
   if(pinEl) pinEl.onkeydown=e=>{ if(e.key==='Enter') btnMgr&&btnMgr.onclick(); };
 
-  // Staff login
-  const btnStaff=$('btn-staff-login');
-  if (btnStaff){
-    const go=async()=>{
-      const user_id=($('login-name')||{}).value?.trim()||'';
-      // IMPROVEMENT 6: Inline field error
-      if(!user_id){ S.loginNameError='Please enter your Staff ID'; render(); setTimeout(()=>{ const el=$('login-name'); if(el) el.focus(); },50); return; }
-      S.loginNameError='';
-      try{
-        const user=await api('POST','/api/auth/staff',{user_id});
+// Staff password setup
+const btnShowPasswordSetup =
+  $('btn-show-password-setup');
 
-        S.token = user.token;
-        S.user = user;
-        S.role = 'staff';
-        S.view = 'staff';
+if (btnShowPasswordSetup) {
+  btnShowPasswordSetup.onclick = () => {
+    const currentStaffId =
+      ($('login-name') || {}).value?.trim() || '';
 
-        await loadAll();
-        sessionStorage.setItem('wps_session', JSON.stringify({ user,role: 'staff',token: user.token }));
-        render();
-      }catch(e){ S.loginNameError=e.message; render(); setTimeout(()=>{ const el=$('login-name'); if(el) el.focus(); },50); }
-    };
-    btnStaff.onclick=go;
-    const ni=$('login-name'); if(ni) ni.onkeydown=e=>{ if(e.key==='Enter') go(); };
-  }
+    S.loginName = currentStaffId;
+    S.loginNameError = '';
+    S.loginPasswordError = '';
+    S.loginMessage = '';
+    S.staffSetupError = '';
+    S.staffPasswordSetup = true;
 
-  // superuser login
-  const btnSuperuser = $('btn-superuser-login');
+    render();
 
-if (btnSuperuser) {
-  const loginSuperuser = async () => {
-    const userId = (
-      $('login-superuser-id') || {}
-    ).value?.trim() || '';
+    setTimeout(() => {
+      const input = $('setup-staff-id');
 
-    if (!userId) {
-      S.loginNameError = 'Please enter your MIS Staff ID';
+      if (input) {
+        input.focus();
+      }
+    }, 50);
+  };
+}
+
+
+// Cancel staff password setup
+const btnCancelPasswordSetup =
+  $('btn-cancel-password-setup');
+
+if (btnCancelPasswordSetup) {
+  btnCancelPasswordSetup.onclick = () => {
+    const currentStaffId =
+      ($('setup-staff-id') || {}).value?.trim() || '';
+
+    S.loginName = currentStaffId;
+    S.staffPasswordSetup = false;
+    S.staffSetupError = '';
+    S.loginPasswordError = '';
+
+    render();
+
+    setTimeout(() => {
+      const input = $('login-password');
+
+      if (input) {
+        input.focus();
+      }
+    }, 50);
+  };
+}
+
+
+// Create first-time staff password
+const btnCreateStaffPassword =
+  $('btn-create-staff-password');
+
+if (btnCreateStaffPassword) {
+  const createStaffPassword = async () => {
+    const user_id =
+      ($('setup-staff-id') || {}).value?.trim() || '';
+
+    const password =
+      ($('setup-password') || {}).value || '';
+
+    const confirm_password =
+      ($('setup-confirm-password') || {}).value || '';
+
+    S.loginName = user_id;
+    S.staffSetupError = '';
+    S.loginMessage = '';
+
+    if (!user_id) {
+      S.staffSetupError = 'Staff ID is required.';
+      render();
+      return;
+    }
+
+    if (!password) {
+      S.staffSetupError = 'Password is required.';
+      render();
+      return;
+    }
+
+   
+
+    if (password.length > 128) {
+      S.staffSetupError =
+        'Password cannot exceed 128 characters.';
+
+      render();
+      return;
+    }
+
+    if (password !== confirm_password) {
+      S.staffSetupError = 'Passwords do not match.';
+      render();
+      return;
+    }
+
+    try {
+      const result = await api(
+        'POST',
+        '/api/auth/staff/password-setup',
+        {
+          user_id,
+          password,
+          confirm_password
+        }
+      );
+
+      S.staffPasswordSetup = false;
+      S.staffSetupError = '';
+      S.loginPasswordError = '';
+      S.loginMessage = result.message ||
+        'Password successfully created. You can now log in.';
+
       render();
 
       setTimeout(() => {
-        const input = $('login-superuser-id');
-        if (input) input.focus();
+        const input = $('login-password');
+
+        if (input) {
+          input.focus();
+        }
+      }, 50);
+
+    } catch (error) {
+      S.staffSetupError = error.message;
+      render();
+
+      setTimeout(() => {
+        const input = $('setup-password');
+
+        if (input) {
+          input.focus();
+        }
+      }, 50);
+    }
+  };
+
+  btnCreateStaffPassword.onclick =
+    createStaffPassword;
+
+  const confirmPasswordInput =
+    $('setup-confirm-password');
+
+  if (confirmPasswordInput) {
+    confirmPasswordInput.onkeydown = event => {
+      if (event.key === 'Enter') {
+        createStaffPassword();
+      }
+    };
+  }
+}
+
+
+// Normal staff login
+const btnStaff = $('btn-staff-login');
+
+if (btnStaff) {
+  const loginStaff = async () => {
+    const user_id =
+      ($('login-name') || {}).value?.trim() || '';
+
+    const password =
+      ($('login-password') || {}).value || '';
+
+    S.loginName = user_id;
+    S.loginNameError = '';
+    S.loginPasswordError = '';
+    S.loginMessage = '';
+
+    if (!user_id) {
+      S.loginNameError =
+        'Please enter your Staff ID.';
+    }
+
+    if (!password) {
+      S.loginPasswordError =
+        'Please enter your password.';
+    }
+
+    if (
+      S.loginNameError ||
+      S.loginPasswordError
+    ) {
+      render();
+      return;
+    }
+
+    try {
+      const data = await api(
+        'POST',
+        '/api/auth/staff',
+        {
+          user_id,
+          password
+        }
+      );
+
+      S.token = data.token;
+      S.user = data.staff;
+      S.role = 'staff';
+      S.view = 'staff';
+
+      await loadAll();
+
+      sessionStorage.setItem(
+        'wps_session',
+        JSON.stringify({
+          user: S.user,
+          role: 'staff',
+          token: S.token
+        })
+      );
+
+      render();
+
+    } catch (error) {
+      S.loginNameError = '';
+      S.loginPasswordError = '';
+      if (error.code === 'STAFF_ID_NOT_FOUND') {
+        S.loginNameError = error.message;
+      } else if (
+        error.code ===
+        'PASSWORD_SETUP_REQUIRED'
+      ) {
+        S.loginPasswordError  =
+          'Please create your password first.';
+      }  else if (
+    error.code === 'INCORRECT_PASSWORD'
+  ) {
+    S.loginPasswordError =
+      'Incorrect password.';
+  } else {
+        S.loginPasswordError = error.message;
+      }
+
+      render();
+
+      setTimeout(() => {
+        const input =
+        error.code === 'STAFF_ID_NOT_FOUND'
+        ? $('login-name')
+        : $('login-password');
+
+        if (input) {
+          input.focus();
+        }
+      }, 50);
+    }
+  };
+
+  btnStaff.onclick = loginStaff;
+
+  const staffIdInput = $('login-name');
+  const staffPasswordInput =
+    $('login-password');
+
+  if (staffIdInput) {
+    staffIdInput.onkeydown = event => {
+      if (event.key === 'Enter') {
+        if (staffPasswordInput) {
+          staffPasswordInput.focus();
+        } else {
+          loginStaff();
+        }
+      }
+    };
+  }
+
+  if (staffPasswordInput) {
+    staffPasswordInput.onkeydown = event => {
+      if (event.key === 'Enter') {
+        loginStaff();
+      }
+    };
+  }
+}
+
+ // Superuser PIN visibility
+const superuserPinToggle =
+  $('btn-superuser-pin-toggle');
+
+if (superuserPinToggle) {
+  superuserPinToggle.onclick = () => {
+    const currentPin =
+      ($('login-superuser-pin') || {}).value || '';
+
+    S.showSuperuserPin = !S.showSuperuserPin;
+
+    render();
+
+    setTimeout(() => {
+      const input = $('login-superuser-pin');
+
+      if (input) {
+        input.value = currentPin;
+        input.focus();
+
+        const length = input.value.length;
+        input.setSelectionRange(length, length);
+      }
+    }, 50);
+  };
+}
+
+
+// Superuser login
+const btnSuperuser = $('btn-superuser-login');
+
+if (btnSuperuser) {
+  const loginSuperuser = async () => {
+    const pin =
+      ($('login-superuser-pin') || {}).value || '';
+
+    S.loginSuperuserPinError = '';
+
+    if (!pin) {
+      S.loginSuperuserPinError =
+        'Please enter the administrator PIN.';
+
+      render();
+
+      setTimeout(() => {
+        const input = $('login-superuser-pin');
+
+        if (input) {
+          input.focus();
+        }
       }, 50);
 
       return;
     }
 
-    S.loginNameError = '';
-
     try {
       const data = await api(
         'POST',
         '/api/auth/superuser',
-        { user_id: userId }
+        { pin }
       );
 
       S.token = data.token;
@@ -3531,31 +4315,36 @@ if (btnSuperuser) {
       sessionStorage.setItem(
         'wps_session',
         JSON.stringify({
-          user: data.user,
+          user: S.user,
           role: 'superuser',
-          token: data.token
+          token: S.token
         })
       );
 
       render();
 
     } catch (error) {
-      S.loginNameError = error.message;
+      S.loginSuperuserPinError = error.message;
+
       render();
 
       setTimeout(() => {
-        const input = $('login-superuser-id');
-        if (input) input.focus();
+        const input = $('login-superuser-pin');
+
+        if (input) {
+          input.focus();
+        }
       }, 50);
     }
   };
 
   btnSuperuser.onclick = loginSuperuser;
 
-  const input = $('login-superuser-id');
+  const superuserPinInput =
+    $('login-superuser-pin');
 
-  if (input) {
-    input.onkeydown = event => {
+  if (superuserPinInput) {
+    superuserPinInput.onkeydown = event => {
       if (event.key === 'Enter') {
         loginSuperuser();
       }
@@ -3627,7 +4416,7 @@ if (refreshEmailLogs) {
   const lo=$('btn-logout');
   if(lo) lo.onclick=()=>{
     sessionStorage.removeItem('wps_session');
-    Object.assign(S,{view:'login',role:null,user:null,selectedRole:null,loginError:'',loginNameError:'',loginPinError:'',showPin:false,detailId:null,search:'',filterStatus:'',showNewProg:false,showNewReport:false,editingReportId:null,editProgMode:false,statusEditMode:false,confirm:null, sidebarOpen: false});
+    Object.assign(S,{view:'login',role:null,user:null,selectedRole:null,loginError:'',loginNameError:'',loginPinError:'',loginPasswordError: '',loginMessage: '',staffPasswordSetup: false,staffSetupError: '',showPin:false,loginSuperuserPinError: '',showSuperuserPin: false,detailId:null,search:'',filterStatus:'',showNewProg:false,showNewReport:false,editingReportId:null,editProgMode:false,statusEditMode:false,confirm:null, sidebarOpen: false});
     render();
   };
 
@@ -3726,7 +4515,7 @@ document.querySelectorAll('[data-nav]').forEach(b => {
       item => item.id === deletedProgrammeId
     );
       confirm(
-      'Delete Programme',
+      'Delete Highlight',
       `Delete "${programme?.title}"? This will remove all its daily reports too. This cannot be undone.`,    async()=>{
       try{
         await api('DELETE',`/api/programmes/${S.detailId}`,{requestedBy:S.user?.name||S.user?.id|| 'Unknown'});
@@ -3740,7 +4529,7 @@ document.querySelectorAll('[data-nav]').forEach(b => {
           }
 
         S.detailId = null;
-        toast('Programme and related email logs deleted.');
+        toast('Highlight and related email logs deleted.');
         render();
       }catch(e){toast(e.message,true);}
     });
@@ -3766,7 +4555,7 @@ document.querySelectorAll('[data-nav]').forEach(b => {
     try{
       const prog=await api('POST','/api/programmes',{title,createdBy:S.user.id,assignedStaff:[S.user.id,...S.newProg.assignedStaff],status:S.newProg.status});
       S.programmes.unshift(prog);S.showNewProg=false;S.newProg={title:'',assignedStaff:[],status:'in-progress'};
-      toast('Programme created!');render();
+      toast('Highlight created!');render();
     }catch(e){toast(e.message,true);}
   };
 
@@ -3789,7 +4578,7 @@ document.querySelectorAll('[data-nav]').forEach(b => {
       const status=($('edit-prog-status')||{}).value||S.editProgDraft.status;
       const up=await api('PUT',`/api/programmes/${S.detailId}`,{title,assignedStaff:S.editProgDraft.assignedStaff,status,updatedBy:S.user?.name||'manager',updateType:'details'});
       const idx=S.programmes.findIndex(p=>p.id===S.detailId);if(idx!==-1)S.programmes[idx]=up;
-      S.editProgMode=false;toast('Programme updated!');render();
+      S.editProgMode=false;toast('Highlight updated!');render();
     }catch(e){toast(e.message,true);}
   };
   const epTitleInput=$('edit-prog-title');

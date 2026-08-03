@@ -6,13 +6,13 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
-import hashlib, bcrypt
+import bcrypt
 import threading
 import hmac
 from werkzeug.utils import secure_filename
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from db import (load_staff_from_db, find_staff_in_db, verify_manager_pin_in_db, load_programmes_from_db, save_programmes_to_db, load_manager_from_db, load_email_settings_from_db, update_email_settings_in_db, create_email_log_in_db, update_email_log_status_in_db,find_superuser_in_db, load_email_logs_from_db, delete_programme_from_db)
+from db import (load_staff_from_db, find_staff_in_db,get_user_encrypted_password_in_db,change_user_password_in_db,load_managers_for_auth, load_superusers_for_auth, get_staff_auth_record,create_staff_password_in_db,encrypt_password,decrypt_password,load_programmes_from_db, save_programmes_to_db, load_email_settings_from_db, update_email_settings_in_db, create_email_log_in_db, update_email_log_status_in_db, load_email_logs_from_db, delete_programme_from_db)
 from dotenv import load_dotenv
 from html import escape as html_escape
 
@@ -71,6 +71,7 @@ LOCK = FileLock(PROGRAMMES_FILE + '.lock')
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app = Flask(__name__, static_folder='.', static_url_path='')
+
 import secrets
 active_sessions = {}
 APP_ROOT = '/daily-report'
@@ -124,9 +125,6 @@ def load_staff():
     return load_staff_from_db()
 
     
-def load_manager():
-    
-    return load_manager_from_db()
 
 def find_staff(name):
     return find_staff_in_db(name)
@@ -723,78 +721,436 @@ def serve_asset(filename):
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
+@app.route(
+    APP_ROOT + '/api/auth/staff/password-setup',
+    methods=['POST']
+)
+def create_staff_password():
+    data = request.get_json(silent=True) or {}
+
+    user_id = str(data.get('user_id') or '').strip()
+    password = str(data.get('password') or '')
+    confirm_password = str(
+        data.get('confirm_password') or ''
+    )
+
+    if not user_id:
+        return jsonify({
+            'error': 'Staff ID is required.'
+        }), 400
+
+    if not password:
+        return jsonify({
+            'error': 'Password is required.'
+        }), 400
+
+    if password != confirm_password:
+        return jsonify({
+            'error': 'Passwords do not match.'
+        }), 400
+
+   
+
+    if len(password) > 128:
+        return jsonify({
+            'error': (
+                'Password cannot exceed 128 characters.'
+            )
+        }), 400
+
+    staff = get_staff_auth_record(user_id)
+
+    if not staff:
+        return jsonify({
+            'error': 'Invalid or inactive Staff ID.'
+        }), 404
+
+    if staff['encrypted_password']:
+        return jsonify({
+            'error': (
+                'A password already exists for this account.'
+            )
+        }), 409
+
+    try:
+        encrypted_password = encrypt_password(password)
+
+        password_created = create_staff_password_in_db(
+            staff['id'],
+            encrypted_password
+        )
+
+    except RuntimeError:
+        app.logger.exception(
+            'MAM encryption failed for staff %s',
+            user_id
+        )
+
+        return jsonify({
+            'error': (
+                'Password creation is currently unavailable.'
+            )
+        }), 503
+
+    except Exception:
+        app.logger.exception(
+            'Database error while creating password for staff %s',
+            user_id
+        )
+
+        return jsonify({
+            'error': (
+                'Password creation is currently unavailable.'
+            )
+        }), 503
+
+    if not password_created:
+        return jsonify({
+            'error': (
+                'The password was not created. A password may '
+                'already exist for this account.'
+            )
+        }), 409
+
+    return jsonify({
+        'ok': True,
+        'message': 'Password successfully created. You can now log in.'
+    })
+
+
 @app.route(APP_ROOT + '/api/auth/staff', methods=['POST'])
 def auth_staff():
     data = request.get_json(silent=True) or {}
-    user_id = data.get('user_id', '').strip()
-    staff = find_staff(user_id)
+
+    user_id = str(data.get('user_id') or '').strip()
+    password = str(data.get('password') or '')
+
+    if not user_id or not password:
+        return jsonify({
+            'error': 'Staff ID and password are required.'
+        }), 400
+
+    staff = get_staff_auth_record(user_id)
+
     if not staff:
-        return jsonify({'error': 'Invalid Staff ID. Please check your ID.'}), 401
+        return jsonify({
+            'error': 'Staff ID was not found or is inactive.',
+            'code': 'STAFF_ID_NOT_FOUND'
+        }), 401
+
+    encrypted_password = staff['encrypted_password']
+
+    if not encrypted_password:
+        return jsonify({
+            'error': 'Password setup is required.',
+            'code': 'PASSWORD_SETUP_REQUIRED'
+        }), 409
+
+    try:
+        stored_password = decrypt_password(encrypted_password)
+    except (RuntimeError, ValueError):
+        app.logger.exception(
+            'Unable to decrypt DWR_PWD for staff %s',
+            user_id
+        )
+
+        return jsonify({
+            'error': 'Staff authentication is unavailable.'
+        }), 503
+
+    if not hmac.compare_digest(
+            password, stored_password
+        ):
+            return jsonify({
+                'error': 'Incorrect password.',
+                'code': 'INCORRECT_PASSWORD'
+            }), 401
+        
     token = secrets.token_hex(32)
+
     active_sessions[token] = {
-        'name': staff['name'], 
         'id': staff['id'],
+        'name': staff['name'],
+        'email': staff['email'],
         'role': 'staff'
     }
+
     return jsonify({
-        'name': staff['name'], 
-        'email': staff['email'],
-        'id': staff['id'],
-        'token': token
+        'ok': True,
+        'token': token,
+        'staff': {
+            'id': staff['id'],
+            'name': staff['name'],
+            'email': staff['email']
+        }
     })
+
+@app.route(
+    APP_ROOT + '/api/auth/change-password',
+    methods=['POST']
+)
+def change_authenticated_user_password():
+    session, error_response, status_code = require_session(
+        request
+    )
+
+    if error_response:
+        return error_response, status_code
+
+    if session.get('role') not in {
+        'staff',
+        'manager',
+        'superuser'
+    }:
+        return jsonify({
+            'error': 'Password changes are not allowed.'
+        }), 403
+
+    user_id = str(session.get('id') or '').strip()
+
+    if not user_id:
+        return jsonify({
+            'error': 'The current account is invalid.'
+        }), 400
+
+    data = request.get_json(silent=True) or {}
+
+    current_password = str(
+        data.get('current_password') or ''
+    )
+
+    new_password = str(
+        data.get('new_password') or ''
+    )
+
+    confirm_password = str(
+        data.get('confirm_password') or ''
+    )
+
+    credential_name = (
+        'PIN'
+        if session.get('role') in {'manager', 'superuser'}
+        else 'password'
+    )
+
+    if not current_password:
+        return jsonify({
+            'error': f'Current {credential_name} is required.',
+            'code': 'CURRENT_PASSWORD_REQUIRED'
+        }), 400
+
+    if not new_password:
+        return jsonify({
+            'error': f'New {credential_name} is required.',
+            'code': 'NEW_PASSWORD_REQUIRED'
+        }), 400
+
+    if new_password != confirm_password:
+        return jsonify({
+            'error': f'New {credential_name}s do not match.',
+            'code': 'PASSWORDS_DO_NOT_MATCH'
+        }), 400
+
+    if len(new_password) > 128:
+        return jsonify({
+            'error': (
+                f'New {credential_name} cannot exceed '
+                '128 characters.'
+            )
+        }), 400
+
+    if hmac.compare_digest(
+        current_password,
+        new_password
+    ):
+        return jsonify({
+            'error': (
+                f'New {credential_name} must be different '
+                f'from the current {credential_name}.'
+            )
+        }), 400
+
+    current_encrypted = (
+        get_user_encrypted_password_in_db(user_id)
+    )
+
+    if not current_encrypted:
+        return jsonify({
+            'error': (
+                f'Current {credential_name} is not configured.'
+            )
+        }), 409
+
+    try:
+        stored_password = decrypt_password(
+            current_encrypted
+        )
+    except (RuntimeError, ValueError):
+        app.logger.exception(
+            'Unable to decrypt DWR_PWD for user %s',
+            user_id
+        )
+
+        return jsonify({
+            'error': (
+                f'Unable to verify the current {credential_name}.'
+            )
+        }), 503
+
+    if not hmac.compare_digest(
+        current_password,
+        stored_password
+    ):
+        return jsonify({
+            'error': f'Current {credential_name} is incorrect.',
+            'code': 'CURRENT_PASSWORD_INCORRECT'
+        }), 401
+
+    try:
+        new_encrypted = encrypt_password(
+            new_password
+        )
+
+        changed = change_user_password_in_db(
+            user_id,
+            current_encrypted,
+            new_encrypted
+        )
+
+    except (RuntimeError, ValueError):
+        app.logger.exception(
+            'MAM encryption failed while changing password for %s',
+            user_id
+        )
+
+        return jsonify({
+            'error': (
+                f'Unable to change the {credential_name}.'
+            )
+        }), 503
+
+    except Exception:
+        app.logger.exception(
+            'Database error while changing password for %s',
+            user_id
+        )
+
+        return jsonify({
+            'error': (
+                f'Unable to change the {credential_name}.'
+            )
+        }), 503
+
+    if not changed:
+        return jsonify({
+            'error': (
+                f'The {credential_name} was not changed. '
+                'Please try again.'
+            )
+        }), 409
+
+    # Remove other active sessions belonging to this user.
+    current_token = request.headers.get(
+        'X-Auth-Token',
+        ''
+    )
+
+    tokens_to_remove = [
+        token
+        for token, active_session in active_sessions.items()
+        if (
+            token != current_token
+            and active_session.get('id') == user_id
+        )
+    ]
+
+    for token in tokens_to_remove:
+        active_sessions.pop(token, None)
+
+    return jsonify({
+        'ok': True,
+        'message': (
+            f'{credential_name.capitalize()} '
+            'successfully changed.'
+        )
+    })
+
 
 @app.route(APP_ROOT + '/api/auth/manager', methods=['POST'])
 def auth_manager():
     data = request.get_json(silent=True) or {}
     pin = data.get('pin', '')
 
-    def login_success():
-        manager = load_manager()
-
-        if not manager:
-            manager = {
-                'id': None,
-                'name': 'Manager'
-            }
-        token = secrets.token_hex(32)
-
-        active_sessions[token] = {
-        'id': manager['id'],
-        'name' : manager['name'],
-        'role':'manager'
-    }
-        
+    if not pin:
         return jsonify({
-        'ok': True,
-        'token': token,
-        'manager':manager
-    })
+            'error': 'Manager PIN is required.'
+        }), 400
 
+    managers = load_managers_for_auth()
 
-    db_hex_hash = verify_manager_pin_in_db()
-    if not db_hex_hash:
+    if not managers:
         return jsonify({
-            'error': 'Manager PIN is not configured'
+            'error': 'Manager PIN is not configured.'
         }), 503
-        
-    input_hash = hashlib.md5(pin.encode()).hexdigest().upper()
 
-    if input_hash == db_hex_hash:
-            return login_success()
-    
-    input_hash = hashlib.md5(
-        pin.encode()
-    ).hexdigest().upper()
+    matched_managers = []
 
-    if hmac.compare_digest(
-        input_hash,
-        db_hex_hash.strip().upper()
-    ):
-        return login_success()
+    for manager in managers:
+        try: 
+            stored_pin = decrypt_password(
+                manager['encrypted_password']
+            )
+        except (RuntimeError, ValueError):
+            app.logger.exception(
+                'Unable to decrypt DWR_PWD for manager %s',
+                manager['id']
+            )
+            continue
+
+        if hmac.compare_digest(pin, stored_pin):
+            matched_managers.append(manager)
+
+    if not matched_managers:
+        return jsonify({
+            'error': 'Incorrect manager PIN.'
+        }), 401
+
+    if len(matched_managers) > 1:
+        app.logger.error(
+            'Duplicate manager PIN detected for manager IDs: %s',
+            ', '.join(
+                manager['id']
+                for manager in matched_managers
+            )
+        )
+
+        return jsonify({
+            'error': (
+                'This PIN is assigned to multiple managers. '
+                'Please contact the administrator.'
+            )
+        }), 503
+
+    matched_manager = matched_managers[0]
+
+    token = secrets.token_hex(32)
+
+    active_sessions[token] = {
+        'id': matched_manager['id'],
+        'name': matched_manager['name'],
+        'email': matched_manager['email'],
+        'role': 'manager'
+    }
 
     return jsonify({
-        'error': 'Incorrect PIN.'
-    }), 401
+        'ok': True,
+        'token': token,
+         'manager': {
+            'id': matched_manager['id'],
+            'name': matched_manager['name'],
+            'email': matched_manager['email']
+        }
+    })
 
 @app.route(
     APP_ROOT + '/api/auth/superuser',
@@ -802,38 +1158,56 @@ def auth_manager():
 )
 def auth_superuser():
     data = request.get_json(silent=True) or {}
+    pin = str(data.get('pin') or '')
 
-    user_id = str(
-        data.get('user_id') or ''
-    ).strip()
-
-    if not user_id:
+    if not pin:
         return jsonify({
-            'error': 'User ID is required'
+            'error':'Administrator PIN is required.'
         }), 400
 
-    superuser = find_superuser_in_db(user_id)
+    superusers = load_superusers_for_auth()
 
-    if not superuser:
+    if not superusers:
         return jsonify({
-            'error': 'Only active MIS users can access this page'
-        }), 403
+            'error': 'Administrator pin is not configured'
+        }), 503
+
+    matched_superuser = None
+
+    for superuser in superusers:
+        try:
+            stored_pin = decrypt_password(
+                superuser['encrypted_password']
+            )
+        except (RuntimeError, ValueError):
+            app.logger.exception(
+            'Unable to decrypt DWR_PWD for superuser %s', superuser['id']
+            )
+            continue
+        if hmac.compare_digest(pin, stored_pin):
+            matched_superuser = superuser
+            break
+
+    if not matched_superuser:
+        return jsonify({
+            'error': 'Incorrect PIN.'
+        }), 401
 
     token = secrets.token_hex(32)
 
     active_sessions[token] = {
-        'id': superuser['id'],
-        'name': superuser['name'],
-        'email': superuser['email'],
+        'id': matched_superuser['id'],
+        'name': matched_superuser['name'],
+        'email': matched_superuser['email'],
         'role': 'superuser',
     }
 
     return jsonify({
         'token': token,
         'user': {
-            'id': superuser['id'],
-            'name': superuser['name'],
-            'email': superuser['email'],
+            'id': matched_superuser['id'],
+            'name': matched_superuser['name'],
+            'email': matched_superuser['email'],
             'role': 'superuser',
         }
     })
@@ -1579,6 +1953,8 @@ EMAIL_EVENT_SETTING_KEYS = {
     'status_updated': 'notifyStatusUpdated',
     'manager_note_added': 'notifyManagerNoteAdded',
 }
+
+
 
 def dispatch_notification_email(
     event_type,
