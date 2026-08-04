@@ -238,7 +238,7 @@ def get_staff_auth_record(user_id):
             WHERE USR_ID = ?
               AND USR_STS = 'A'
               AND USR_DEPT IN ('QE', 'MIS')
-              AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%')
+              AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%' OR USR_ID = 'D8798')
               AND (
                     VC_USR_ROLE IS NULL
                     OR VC_USR_ROLE <> 'MANAGER'
@@ -306,7 +306,7 @@ def create_staff_password_in_db(user_id, encrypted_password):
             WHERE USR_ID = ?
               AND USR_STS = 'A'
               AND USR_DEPT IN ('QE', 'MIS')
-              AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%')
+              AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%'OR USR_ID = 'D8798')
               AND (
                     VC_USR_ROLE IS NULL
                     OR VC_USR_ROLE <> 'MANAGER'
@@ -398,7 +398,7 @@ def load_staff_from_db():
         cursor.execute("""
             SELECT USR_ID, USR_NAME, USR_MAIL
             FROM TBL_USR 
-            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%') AND ( DWR_PWD IS NULL OR LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive')
+            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%'OR USR_ID = 'D8798') AND ( DWR_PWD IS NULL OR LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive')
         """)
         
         for row in cursor.fetchall():
@@ -428,7 +428,7 @@ def find_staff_in_db(user_id):
         cursor.execute("""
             SELECT USR_ID, USR_NAME, USR_MAIL
             FROM TBL_USR 
-            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE', 'MIS') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%')  AND ( DWR_PWD IS NULL OR LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive') AND USR_ID = ?
+            WHERE USR_STS = 'A' AND USR_DEPT IN ('QE', 'MIS') AND (USR_ID LIKE 'S%' OR USR_ID LIKE 'MS%'OR USR_ID = 'D8798')  AND ( DWR_PWD IS NULL OR LOWER(LTRIM(RTRIM(DWR_PWD))) <> 'inactive') AND USR_ID = ?
         """, (user_id,))
         
         row = cursor.fetchone()
